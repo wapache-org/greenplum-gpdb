@@ -27,7 +27,7 @@ output "gpdb-clients-ip" {
 }
 
 resource "google_compute_disk" "windows2012" {
-  name  = "windows2012-boot-disk"
+  name  = "windows2012-boot-disk-${random_uuid.postfix.result}"
   type  = "pd-ssd"
   zone  = "${var.region_zone}"
   snapshot = "windows-test-ssh"
