@@ -31,7 +31,7 @@ output "gpdb-clients-ip" {
 }
 
 resource "google_compute_disk" "windows2012" {
-  name  = "disk-${random_id.id.hex}"
+  name  = "windows2012-boot-disk-${random_uuid.postfix.result}"
   type  = "pd-ssd"
   zone  = "${var.region_zone}"
   snapshot = "gpdb-win-remote-test"
