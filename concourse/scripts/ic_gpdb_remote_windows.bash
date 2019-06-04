@@ -35,6 +35,8 @@ function run_remote_test() {
       echo "invalid package name"
     fi
     scp ./bin_gpdb_clients_windows_rc/*.msi $REMOTE_USER@$REMOTE_HOST:
+    ssh -T -p $REMOTE_PORT $REMOTE_USER@$REMOTE_HOST "msiexec /I greenplum-clients-$VERSION-x86_64.msi /quiet"
+
     scp -P $REMOTE_PORT -r ./gpdb_src/gpMgmt/bin/gpload_test/gpload2 $REMOTE_USER@$REMOTE_HOST:.
     scp -P $REMOTE_PORT ./gpdb_src/src/test/regress/*.pl $REMOTE_USER@$REMOTE_HOST:./gpload2
     scp -P $REMOTE_PORT ./gpdb_src/src/test/regress/*.pm $REMOTE_USER@$REMOTE_HOST:./gpload2
