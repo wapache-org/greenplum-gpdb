@@ -38,15 +38,9 @@ function run_remote_test() {
     scp -P $REMOTE_PORT -r ./gpdb_src/gpMgmt/bin/gpload_test/gpload2 $REMOTE_USER@$REMOTE_HOST:.
     scp -P $REMOTE_PORT ./gpdb_src/src/test/regress/*.pl $REMOTE_USER@$REMOTE_HOST:./gpload2
     scp -P $REMOTE_PORT ./gpdb_src/src/test/regress/*.pm $REMOTE_USER@$REMOTE_HOST:./gpload2
+    scp -P $REMOTE_PORT ./gpdb_src/concourse/scripts/ic_gpdb_remote_windows.bat $REMOTE_USER@$REMOTE_HOST:
 
-    ssh -tt -R$PGPORT:127.0.0.1:$PGPORT -L8081:127.0.0.1:8081 -L8082:127.0.0.1:8082 -p $REMOTE_PORT $REMOTE_USER@$REMOTE_HOST <<- EOF
-    set PGPORT=$PGPORT
-    set PGUSER=gpadmin
-    set PGHOST=127.0.0.1
-    call "C:\Program Files\Greenplum\greenplum-clients-$VERSION\greenplum_clients_path.bat"
-    cd gpload2
-    python TEST_REMOTE.py
-EOF
+    ssh -T -R$PGPORT:127.0.0.1:$PGPORT -L8081:127.0.0.1:8081 -L8082:127.0.0.1:8082 -p $REMOTE_PORT $REMOTE_USER@$REMOTE_HOST "ic_gpdb_remote_windows.bat $PGPORT $VERSION"
 }
 
 function _main() {
