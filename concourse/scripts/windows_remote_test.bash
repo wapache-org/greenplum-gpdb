@@ -49,6 +49,7 @@ function run_clients_test() {
     export -f configure_gpdb_ssl
     su gpadmin -c configure_gpdb_ssl
     scp ./gpdb_src/concourse/scripts/windows_remote_test.ps1 $REMOTE_USER@$REMOTE_HOST:
+    scp ./bin_gpdb_clients_windows_rc/*.msi $REMOTE_USER@$REMOTE_HOST:
     ssh -T -R$PGPORT:127.0.0.1:$PGPORT -p $REMOTE_PORT $REMOTE_USER@$REMOTE_HOST 'powershell < windows_remote_test.ps1'
 }
 
@@ -73,10 +74,12 @@ function _main() {
         REMOTE_PORT=22
     fi
 
+    yum install -y jq
+    export REMOTE_HOST=`jq -r '."gpdb-clients-ip"' terraform/metadata`
+
     time create_cluster
     time import_remote_key
     time run_remote_test
-    exit 1
 }
 
 _main "$@"
