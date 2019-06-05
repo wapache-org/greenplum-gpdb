@@ -38,7 +38,7 @@ resources:
   source:
     bucket: ((pivotal-gp-internal-artifacts-gcs-bucket))
     json_key: ((concourse-gcs-resources-service-account-key))
-    versioned_file: clients/published/gpdb6/greenplum-clients-6.0.0-x86_64.msi
+    versioned_file: clients/published/gpdb6/greenplum-clients-x86_64.msi
 
 - name: gpdb6-centos7-test
   type: docker-image
@@ -86,7 +86,7 @@ jobs:
       REMOTE_KEY: {{remote_key_build}}
   - put: bin_gpdb_clients_windows_rc
     params:
-      file: "gpdb_artifacts/greenplum-clients-*-x86_64.msi"
+      file: "gpdb_artifacts/greenplum-clients-x86_64.msi"
 
 - name: test_gpdb_windows_remote
   plan:

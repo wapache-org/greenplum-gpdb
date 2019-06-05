@@ -75,6 +75,9 @@ function _main() {
     yum install -y jq
     export REMOTE_HOST=`jq -r '."gpdb-clients-ip"' terraform/metadata`
 
+    yum install -y jq
+    export REMOTE_HOST=`jq -r '."gpdb-clients-ip"' terraform/metadata`
+
     time create_cluster
     time import_remote_key
     time run_remote_test
