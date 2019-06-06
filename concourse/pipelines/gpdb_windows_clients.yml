@@ -40,6 +40,13 @@ resources:
     json_key: ((concourse-gcs-resources-service-account-key))
     versioned_file: clients/published/gpdb6/greenplum-clients-x86_64.msi
 
+- name: bin_windows_gpfdist_pipe_test
+  type: gcs
+  source:
+    bucket: ((pivotal-gp-internal-artifacts-gcs-bucket))
+    json_key: ((concourse-gcs-resources-service-account-key))
+    versioned_file: clients/published/gpdb6/pipe_win10.exe
+
 - name: gpdb6-centos7-test
   type: docker-image
   source:
@@ -87,6 +94,9 @@ jobs:
   - put: bin_gpdb_clients_windows_rc
     params:
       file: "gpdb_artifacts/greenplum-clients-x86_64.msi"
+  - put: bin_windows_gpfdist_pipe_test
+    params:
+      file: "gpdb_artifacts/pipe_win10.exe"
 
 - name: test_gpdb_windows_remote
   plan:
@@ -96,6 +106,8 @@ jobs:
       passed: [compile_gpdb_windows_remote]
     - get: gpdb6-centos7-test
     - get: bin_gpdb_clients_windows_rc
+      passed: [compile_gpdb_windows_remote]
+    - get: bin_windows_gpfdist_pipe_test
       passed: [compile_gpdb_windows_remote]
     - get: bin_gpdb
       resource: bin_gpdb_centos7
@@ -112,15 +124,3 @@ jobs:
       REMOTE_PORT: {{remote_port_test}}
       REMOTE_USER: {{remote_user_test}}
       REMOTE_KEY: {{remote_key_test}}
-
-  ensure:
-    put: terraform
-    params:
-      action: destroy
-      env_name_file: terraform/name
-      terraform_source: gpdb_src/concourse/terraform/
-      vars:
-        aws_instance-node-instance_type: t2.micro #t2.micro is ignored in destroy, but aws_instance-node-instance_type is required.
-        aws_ebs_volume_type: standard
-    get_params:
-      action: destroy

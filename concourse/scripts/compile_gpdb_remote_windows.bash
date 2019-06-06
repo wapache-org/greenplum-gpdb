@@ -59,6 +59,7 @@ EOF
 
 function download() {
     scp -P $REMOTE_PORT -q $REMOTE_USER@$REMOTE_HOST:$WORK_DIR/*.msi $ROOT_DIR/gpdb_artifacts/
+    scp -P $REMOTE_PORT -q $REMOTE_USER@$REMOTE_HOST:$WORK_DIR/*.exe $ROOT_DIR/gpdb_artifacts/ 
 }
 
 # Since we are cloning and building on remote machine,

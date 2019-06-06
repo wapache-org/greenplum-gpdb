@@ -28,3 +28,8 @@ cd %WORK_DIR%\gpdb_src\gpAux\client\install\src\windows\
 @call CreatePackage.bat %WORK_DIR%\greenplum-db-devel %GPDB_VERSION%
 
 move *.msi %WORK_DIR%
+
+REM build window pipe client
+cd %WORK_DIR%\gpdb_src\src\bin\gpfdist\wintest\
+cl pipe_win10.cpp
+move *.exe %WORK_DIR%
