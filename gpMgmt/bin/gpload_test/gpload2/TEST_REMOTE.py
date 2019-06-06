@@ -356,8 +356,7 @@ class GPLoad_FormatOpts_TestCase(unittest.TestCase):
         commands = "gpload -f "+mkpath(os.path.join('config','config_file'))+" -d reuse_gptest"+os.linesep+"gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest\n"
         if (platform.system()) in ['Windows', 'Microsoft']:
             ext = '.bat'
-            commands = "@ECHO OFF" + os.linesep+ " call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest"+os.linesep+"call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest\n"
-
+            commands = "@ECHO OFF" + os.linesep+ " call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest"+os.linesep+"call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest" + os.linesep
         f = open(mkpath('run_gpload' + ext), 'w')
         f.write(commands)
         f.write(query)
@@ -418,7 +417,7 @@ class GPLoad_FormatOpts_TestCase(unittest.TestCase):
         "7  gpload insert mode without reuse"
         runfile(mkpath('setup.sql'))
         write_config_file(mode='insert',reuse_flag='false')
-        self.doTest(7, "psql -d reuse_gptest -c 'select count(*) from texttable;'")
+        self.doTest(7, 'psql -d reuse_gptest -c "select count(*) from texttable;"')
 
     def test_08_gpload_reuse_table_update_mode_with_reuse(self):
         "8  gpload update mode with reuse"
@@ -431,7 +430,7 @@ class GPLoad_FormatOpts_TestCase(unittest.TestCase):
         "9  gpload update mode without reuse"
         copy_data('external_file_05.txt','data_file.txt')
         write_config_file(mode='update',reuse_flag='false',file='data_file.txt')
-        self.doTest(9, "psql -d reuse_gptest -c 'select count(*) from texttable;'\n"+"psql -d reuse_gptest -c 'select * from texttable where n2=222;'")
+        self.doTest(9, 'psql -d reuse_gptest -c "select count(*) from texttable;"\n'+'psql -d reuse_gptest -c "select * from texttable where n2=222;"')
 
     def test_10_gpload_reuse_table_merge_mode_with_reuse(self):
         "10  gpload merge mode with reuse "
