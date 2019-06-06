@@ -352,17 +352,21 @@ class GPLoad_FormatOpts_TestCase(unittest.TestCase):
         if os.path.isfile(file):
            os.remove(file)
         ext = '.sh'
+
+        commands = "gpload -f "+mkpath(os.path.join('config','config_file'))+" -d reuse_gptest"+os.linesep+"gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest\n"
         if (platform.system()) in ['Windows', 'Microsoft']:
             ext = '.bat'
-        f = open(mkpath('run_gpload' + ext), 'w')
+            commands = "@ECHO OFF" + os.linesep+ " call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest"+os.linesep+"call gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest\n"
 
-        f.write("gpload -f "+mkpath(os.path.join('config','config_file'))+ " -d reuse_gptest"+os.linesep+"gpload -f "+os.path.join('config','config_file')+ " -d reuse_gptest\n" )
+        f = open(mkpath('run_gpload' + ext), 'w')
+        f.write(commands)
         f.write(query)
         f.close()
 
         cmd = 'sh run_gpload.sh > query%d.out 2>&1' % num
         if (platform.system()) in ['Windows', 'Microsoft']:
-            cmd = 'cmd /c run_gpload.bat > query%d.out 2>&1' % num
+            cmd = 'call run_gpload.bat > query%d.out 2>&1' % num
+
 
         run(cmd)
         self.check_result(file)
