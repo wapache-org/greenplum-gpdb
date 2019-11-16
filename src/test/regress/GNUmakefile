@@ -20,9 +20,6 @@ ifdef TEMP_CONFIG
 TEMP_CONF += --temp-config=$(TEMP_CONFIG)
 endif
 
-# Greenplum regression tests use $PGPORT
-PGPORT?=15432
-
 # where to find psql for testing an existing installation
 PSQLDIR = $(bindir)
 
@@ -50,7 +47,7 @@ LIBS := $(filter-out -lreadline -ledit -ltermcap -lncurses -lcurses -lcurl -lssl
 
 # Build regression test driver
 
-all: pg_regress$(X)
+all: pg_regress$(X) scan_flaky_fault_injectors
 
 pg_regress$(X): pg_regress.o pg_regress_main.o | submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@
@@ -60,6 +57,10 @@ pg_regress.o: pg_regress.c $(top_builddir)/src/port/pg_config_paths.h
 pg_regress.o: override CPPFLAGS += -I$(top_builddir)/src/port $(EXTRADEFS)
 regress_gp.o: override CFLAGS += -I$(top_builddir)/src/interfaces/libpq
 regress_gp.o: override LDFLAGS += -L$(top_builddir)/src/interfaces/libpq
+
+.PHONY: scan_flaky_fault_injectors
+scan_flaky_fault_injectors:
+	$(top_builddir)/src/test/regress/scan_flaky_fault_injectors.sh
 
 twophase_pqexecparams: twophase_pqexecparams.c
 	$(CC) $(CPPFLAGS) -I$(top_builddir)/src/interfaces/libpq -L$(GPHOME)/lib -L$(top_builddir)/src/interfaces/libpq  -o $@ $< -lpq
@@ -131,7 +132,7 @@ installdirs-tests: installdirs
 
 # Get some extra C modules from contrib/spi and contrib/dummy_seclabel...
 
-all: refint$(DLSUFFIX) autoinc$(DLSUFFIX) dummy_seclabel$(DLSUFFIX) tablespace-setup includecheck hooktest query_info_hook_test
+all: refint$(DLSUFFIX) autoinc$(DLSUFFIX) dummy_seclabel$(DLSUFFIX) tablespace-setup hooktest query_info_hook_test
 
 refint$(DLSUFFIX): $(top_builddir)/contrib/spi/refint$(DLSUFFIX)
 	cp $< $@
@@ -170,12 +171,10 @@ tablespace-setup:
 	./testtablespace_existing_version_dir/6/GPDB_99_399999991/ \
 	./testtablespace_existing_version_dir/7/GPDB_99_399999991/ \
 	./testtablespace_existing_version_dir/8/GPDB_99_399999991/ \
-        ./testtablespace_1111111111222222222233333333334444444444555555555566666666667777777777888888888899999999990000000000/
-
-# Check for include files that are not being shipped
-.PHONY: includecheck
-includecheck:
-	$(srcdir)/checkinc.py
+        ./testtablespace_1111111111222222222233333333334444444444555555555566666666667777777777888888888899999999990000000000/ \
+	./testtablespace_default_tablespace \
+	./testtablespace_temp_tablespace \
+	./testtablespace_database_tablespace
 
 .PHONY: hooktest
 hooktest:
@@ -201,8 +200,11 @@ check-tests: all tablespace-setup
 #	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/serial_schedule $(EXTRA_TESTS)
 installcheck: installcheck-good
 
+installcheck-small: all
+	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule $(EXTRA_TESTS)
+
 installcheck-good: all twophase_pqexecparams hooktest query_info_hook_test
-	$(pg_regress_installcheck) $(REGRESS_OPTS)  --schedule=$(srcdir)/parallel_schedule --schedule=$(srcdir)/greenplum_schedule --ao-dir=uao $(EXTRA_TESTS)
+	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule --schedule=$(srcdir)/greenplum_schedule $(EXTRA_TESTS)
 
 installcheck-parallel: all tablespace-setup
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule $(MAXCONNOPT) $(EXTRA_TESTS)
@@ -256,8 +258,7 @@ clean distclean maintainer-clean: clean-lib
 	rm -f pg_regress_main.o pg_regress.o pg_regress$(X)
 # things created by various check targets
 	rm -f $(output_files) $(input_files)
-	rm -rf testtablespace
-	rm -rf testtablespace_otherloc
+	rm -rf ./testtablespace ./testtablespace_*
 	rm -rf $(pg_regress_clean_files)
 	rm -f data/pg_class32.data
 	rm -f gmon.out

@@ -30,9 +30,9 @@
 
 #include "gpopt/gpdbwrappers.h"
 #include "catalog/pg_collation.h"
-
-#include "utils/ext_alloc.h"
-
+extern "C" {
+	#include "utils/memutils.h"
+}
 #define GP_WRAP_START	\
 	sigjmp_buf local_sigjmp_buf;	\
 	{	\
@@ -2137,6 +2137,22 @@ gpdb::IsOpHashJoinable
 }
 
 bool
+gpdb::IsOpMergeJoinable
+	(
+	Oid opno,
+	Oid inputtype
+	)
+{
+	GP_WRAP_START;
+	{
+		/* catalog tables: pg_operator */
+		return op_mergejoinable(opno, inputtype);
+	}
+	GP_WRAP_END;
+	return false;
+}
+
+bool
 gpdb::IsOpStrict
 	(
 	Oid opno
@@ -2661,7 +2677,7 @@ gpdb::GetComponentDatabases(void)
 	GP_WRAP_START;
 	{
 		/* catalog tables: gp_segment_config */
-		return cdbcomponent_getCdbComponents(true);
+		return cdbcomponent_getCdbComponents();
 	}
 	GP_WRAP_END;
 	return NULL;
@@ -2904,6 +2920,21 @@ gpdb::GetOpFamiliesForScOp
 	return NIL;
 }
 
+List *
+gpdb::GetMergeJoinOpFamilies
+	(
+	Oid opno
+	)
+{
+	GP_WRAP_START;
+	{
+		/* catalog tables: pg_amop */
+
+		return get_mergejoin_opfamilies(opno);
+	}
+	GP_WRAP_END;
+	return NIL;
+}
 
 
 // Evaluates 'expr' and returns the result as an Expr.
@@ -3000,17 +3031,12 @@ gpdb::RunStaticPartitionSelection
 FaultInjectorType_e
 gpdb::InjectFaultInOptTasks
 	(
-	FaultInjectorIdentifier_e identifier
+	const char *fault_name
 	)
 {
-	/*
-	 * To activate this fault injection point, use gp_inject_fault
-	 * extension with opt_task_allocate_string_buffer as the fault
-	 * name.
-	 */
 	GP_WRAP_START;
 	{
-		return FaultInjector_InjectFaultIfSet(identifier, DDLNotSpecified, "", "");
+		return FaultInjector_InjectFaultIfSet(fault_name, DDLNotSpecified, "", "");
 	}
 	GP_WRAP_END;
 	return FaultInjectorTypeNotSpecified;
@@ -3162,35 +3188,6 @@ gpdb::MDCacheNeedsReset
 	return true;
 }
 
-// Functions for ORCA's memory consumption to be tracked by GPDB
-void *
-gpdb::OptimizerAlloc
-		(
-			size_t size
-		)
-{
-	GP_WRAP_START;
-	{
-		return Ext_OptimizerAlloc(size);
-	}
-	GP_WRAP_END;
-
-	return NULL;
-}
-
-void
-gpdb::OptimizerFree
-		(
-			void *ptr
-		)
-{
-	GP_WRAP_START;
-	{
-		Ext_OptimizerFree(ptr);
-	}
-	GP_WRAP_END;
-}
-
 // returns true if a query cancel is requested in GPDB
 bool
 gpdb::IsAbortRequested
@@ -3239,6 +3236,56 @@ gpdb::HashText(Datum d)
 		return DatumGetUInt32(DirectFunctionCall1(hashtext, d));
 	}
 	GP_WRAP_END;
+}
+
+uint32
+gpdb::UUIDHash(Datum d)
+{
+	GP_WRAP_START;
+	{
+		return DatumGetUInt32(DirectFunctionCall1(uuid_hash, d));
+	}
+	GP_WRAP_END;
+}
+
+void *
+gpdb::GPDBMemoryContextAlloc
+	(
+	MemoryContext context,
+	Size size
+	)
+{
+	GP_WRAP_START;
+	{
+		return MemoryContextAlloc(context, size);
+	}
+	GP_WRAP_END;
+	return NULL;
+}
+
+void
+gpdb::GPDBMemoryContextDelete(MemoryContext context)
+{
+	GP_WRAP_START;
+	{
+		MemoryContextDelete(context);
+	}
+	GP_WRAP_END;
+}
+
+MemoryContext
+gpdb::GPDBAllocSetContextCreate()
+{
+	GP_WRAP_START;
+	{
+		return AllocSetContextCreate(OptimizerMemoryContext,
+		"GPORCA memory pool",
+		ALLOCSET_DEFAULT_MINSIZE,
+		ALLOCSET_DEFAULT_INITSIZE,
+		ALLOCSET_DEFAULT_MAXSIZE);
+	}
+	GP_WRAP_END;
+	return NULL;
 }
 
 // EOF

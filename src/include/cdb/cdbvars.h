@@ -149,6 +149,7 @@ extern bool Gp_is_writer;
  * session throughout the entire Greenplum array.
  */
 extern int gp_session_id;
+#define InvalidGpSessionId	(-1)
 
 /* The Hostname where this segment's QD is located. This variable is NULL for the QD itself */
 extern char * qdHostname;
@@ -381,17 +382,6 @@ extern int	Gp_interconnect_debug_retry_interval;
 
 /* UDP recv buf size in KB.  For testing */
 extern int 	Gp_udp_bufsize_k;
-
-/*
- * Parameter Gp_interconnect_hash_multiplier
- *
- * The run-time parameter Gp_interconnect_hash_multiplier
- * controls the number of hash buckets used to track 'connections.'
- *
- * This guc is specific to the UDP-interconnect.
- *
- */
-extern int	Gp_interconnect_hash_multiplier;
 
 /*
  * Parameter gp_interconnect_aggressive_retry

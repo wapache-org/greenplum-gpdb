@@ -106,7 +106,7 @@ CTranslatorRelcacheToDXL::RetrieveObject
 	GPOS_ASSERT(NULL != md_accessor);
 
 #ifdef FAULT_INJECTOR
-	gpdb::InjectFaultInOptTasks(OptRelcacheTranslatorCatalogAccess);
+	gpdb::InjectFaultInOptTasks("opt_relcache_translator_catalog_access");
 #endif // FAULT_INJECTOR
 
 	switch(mdid->MdidType())
@@ -1115,16 +1115,18 @@ CTranslatorRelcacheToDXL::RetrieveIndex
 		}
 	
 		index_type = IMDIndex::EmdindBtree;
-		IMDRelation::Erelstoragetype rel_storage_type = md_rel->RetrieveRelStorageType();
-		if (GIST_AM_OID == index_rel->rd_rel->relam)
+		mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
+		if (GIN_AM_OID == index_rel->rd_rel->relam)
+		{
+				index_type = IMDIndex::EmdindGin;
+		}
+		else if (GIST_AM_OID == index_rel->rd_rel->relam)
 		{
 			index_type = IMDIndex::EmdindGist;
-			mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
 		}
-		else if (BITMAP_AM_OID == index_rel->rd_rel->relam || IMDRelation::ErelstorageAppendOnlyRows == rel_storage_type || IMDRelation::ErelstorageAppendOnlyCols == rel_storage_type)
+		else if (BITMAP_AM_OID == index_rel->rd_rel->relam)
 		{
 			index_type = IMDIndex::EmdindBitmap;
-			mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
 		}
 
 		// get the index name
@@ -1381,19 +1383,21 @@ CTranslatorRelcacheToDXL::RetrievePartTableIndex
 	default_levels_derived->Release();
 	mdid_index->AddRef();
 
-	GPOS_ASSERT(INDTYPE_BITMAP == index_info->indType || INDTYPE_BTREE == index_info->indType || INDTYPE_GIST == index_info->indType);
+	GPOS_ASSERT(INDTYPE_BITMAP == index_info->indType || INDTYPE_BTREE == index_info->indType || INDTYPE_GIST == index_info->indType || INDTYPE_GIN == index_info->indType);
 
 	IMDIndex::EmdindexType index_type = IMDIndex::EmdindBtree;
-	IMDId *mdid_item_type = NULL;
+	IMDId *mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
 	if (INDTYPE_BITMAP == index_info->indType)
 	{
 		index_type = IMDIndex::EmdindBitmap;
-		mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
 	}
 	else if (INDTYPE_GIST == index_info->indType)
 	{
 		index_type = IMDIndex::EmdindGist;
-		mdid_item_type = GPOS_NEW(mp) CMDIdGPDB(GPDB_ANY);
+	}
+	else if (INDTYPE_GIN == index_info->indType)
+	{
+		index_type = IMDIndex::EmdindGin;
 	}
 
 	IMdIdArray *pdrgpmdidOpFamilies = RetrieveIndexOpFamilies(mp, mdid_index);
@@ -1612,6 +1616,7 @@ CTranslatorRelcacheToDXL::RetrieveType
 	CMDIdGPDB *mdid_op_geq = GPOS_NEW(mp) CMDIdGPDB(gpdb::GetInverseOp(ptce->lt_opr));
 	CMDIdGPDB *mdid_op_cmp = GPOS_NEW(mp) CMDIdGPDB(ptce->cmp_proc);
 	BOOL is_hashable = gpdb::IsOpHashJoinable(ptce->eq_opr, oid_type);
+	BOOL is_merge_joinable = gpdb::IsOpMergeJoinable(ptce->eq_opr, oid_type);
 	BOOL is_composite_type = gpdb::IsCompositeType(oid_type);
 
 	// get standard aggregates
@@ -1659,6 +1664,7 @@ CTranslatorRelcacheToDXL::RetrieveType
 						 mdid_sum,
 						 mdid_count,
 						 is_hashable,
+						 is_merge_joinable,
 						 is_composite_type,
 						 mdid_type_relid,
 						 mdid_type_array,
@@ -3392,7 +3398,8 @@ CTranslatorRelcacheToDXL::IsIndexSupported
 	// index expressions and index constraints not supported
 	return gpdb::HeapAttIsNull(tup, Anum_pg_index_indexprs) &&
 		gpdb::HeapAttIsNull(tup, Anum_pg_index_indpred) &&
-		(BTREE_AM_OID == index_rel->rd_rel->relam || BITMAP_AM_OID == index_rel->rd_rel->relam || GIST_AM_OID == index_rel->rd_rel->relam);
+		(BTREE_AM_OID == index_rel->rd_rel->relam || BITMAP_AM_OID == index_rel->rd_rel->relam || GIST_AM_OID == index_rel->rd_rel->relam ||
+		 	GIN_AM_OID == index_rel->rd_rel->relam);
 }
 
 //---------------------------------------------------------------------------

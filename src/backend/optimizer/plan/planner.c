@@ -235,13 +235,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 		if (gp_log_optimization_time)
 			INSTR_TIME_SET_CURRENT(starttime);
 
-		curMemoryAccountId = MemoryAccounting_GetOrCreateOptimizerAccount();
-
-		START_MEMORY_ACCOUNT(curMemoryAccountId);
-		{
-			result = optimize_query(parse, boundParams);
-		}
-		END_MEMORY_ACCOUNT();
+		result = optimize_query(parse, boundParams);
 
 		if (gp_log_optimization_time)
 		{
@@ -1147,7 +1141,6 @@ inheritance_planner(PlannerInfo *root)
 	Oid			parentOid = InvalidOid;
 
 	/* MPP */
-	Plan	   *plan;
 	CdbLocusType append_locustype = CdbLocusType_Null;
 	bool		locus_ok = TRUE;
 
@@ -1520,34 +1513,57 @@ inheritance_planner(PlannerInfo *root)
 	/* Mark result as unordered (probably unnecessary) */
 	root->query_pathkeys = NIL;
 
-	/*
-	 * If we managed to exclude every child rel, return a dummy plan; it
-	 * doesn't even need a ModifyTable node.
-	 */
 	if (subplans == NIL)
 	{
-		/* although dummy, it must have a valid tlist for executor */
+		/*
+		 * We managed to exclude every child rel, so generate a dummy path
+		 * representing the empty set.  Although it's clear that no data will
+		 * be updated or deleted, we will still need to have a ModifyTable
+		 * node so that any statement triggers are executed.  (This could be
+		 * cleaner if we fixed nodeModifyTable.c to support zero child nodes,
+		 * but that probably wouldn't be a net win.)
+		 */
 		List	   *tlist;
+		Plan	   *subplan;
 
+		/* tlist processing never got done, either */
 		tlist = preprocess_targetlist(root, parse->targetList);
-		plan = (Plan *) make_result(root,
-									tlist,
-									(Node *) list_make1(makeBoolConst(false,
-																	  false)),
-									NULL);
 
+		subplan = (Plan *) make_result(root,
+									   tlist,
+									 (Node *) list_make1(makeBoolConst(false,
+																	 false)),
+									   NULL);
+
+		/*
+		 * Attach flow to the dummy Result node, so as to avoid an assertion
+		 * failure.  See GitHub issue #1433.
+		 */
 		if (Gp_role == GP_ROLE_DISPATCH)
-			mark_plan_general(plan, parentPolicy->numsegments);
+			mark_plan_general(subplan, parentPolicy->numsegments);
 
-		return plan;
+		/* These lists must be nonempty to make a valid ModifyTable node */
+		subplans = list_make1(subplan);
+		resultRelations = list_make1_int(parse->resultRelation);
+		if (parse->withCheckOptions)
+			withCheckOptionLists = list_make1(parse->withCheckOptions);
+		if (parse->returningList)
+			returningLists = list_make1(parse->returningList);
+
+		/* for a dummy subplan, set is_split_update to false */
+		is_split_updates = lappend_int(is_split_updates, false);
 	}
-
-	/*
-	 * Put back the final adjusted rtable into the master copy of the Query.
-	 */
-	parse->rtable = final_rtable;
-	root->simple_rel_array_size = save_rel_array_size;
-	root->simple_rel_array = save_rel_array;
+	else
+	{
+		/*
+		 * Put back the final adjusted rtable into the master copy of the
+		 * Query.  (We mustn't do this if we found no non-excluded children,
+		 * since we never saved an adjusted rtable at all.)
+		 */
+		parse->rtable = final_rtable;
+		root->simple_rel_array_size = save_rel_array_size;
+		root->simple_rel_array = save_rel_array;
+	}
 
 	/*
 	 * If there was a FOR [KEY] UPDATE/SHARE clause, the LockRows node will
@@ -1704,6 +1720,24 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 	(gp_motion_cost_per_row > 0.0) ?
 	gp_motion_cost_per_row :
 	2.0 * cpu_tuple_cost;
+
+	/*
+	 * If limit clause contains volatile functions, they should be
+	 * evaluated only once. For such cases, we should not push down
+	 * the limit.
+	 *
+	 * Words on multi-stage limit: current interconnect implementation
+	 * model is sender will send when buffer is full. Under such
+	 * condition, multi-stage limit might improve performance for
+	 * some cases.
+	 *
+	 * TODO: we might investigate that evaluating limit clause first,
+	 * and then doing pushdown it in future.
+	 */
+	bool        limit_contain_volatile_functions;
+	limit_contain_volatile_functions = (contain_volatile_functions(parse->limitCount)
+										|| contain_volatile_functions(parse->limitOffset));
+
 
 	CdbPathLocus_MakeNull(&current_locus, GP_POLICY_INVALID_NUMSEGMENTS());
 
@@ -2180,33 +2214,6 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			result_plan = cdb_grouping_planner(root,
 											   &agg_costs,
 											   &group_context);
-
-			/* Add the Repeat node if needed. */
-			if (result_plan != NULL &&
-				canonical_grpsets != NULL &&
-				canonical_grpsets->grpset_counts != NULL)
-			{
-				bool		need_repeat_node = false;
-				int			grpset_no;
-				int			repeat_count = 0;
-
-				for (grpset_no = 0; grpset_no < canonical_grpsets->ngrpsets; grpset_no++)
-				{
-					if (canonical_grpsets->grpset_counts[grpset_no] > 1)
-					{
-						need_repeat_node = true;
-						break;
-					}
-				}
-
-				if (canonical_grpsets->ngrpsets == 1)
-					repeat_count = canonical_grpsets->grpset_counts[0];
-
-				if (need_repeat_node)
-				{
-					result_plan = add_repeat_node(result_plan, repeat_count, 0);
-				}
-			}
 
 			if (result_plan != NULL && querynode_changed)
 			{
@@ -2940,7 +2947,8 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 					 * the entire sorted result-set by plunking a limit on the
 					 * top of the unique-node.
 					 */
-					if (parse->limitCount)
+					if (parse->limitCount &&
+						!limit_contain_volatile_functions)
 					{
 						/*
 						 * Our extra limit operation is basically a
@@ -3162,7 +3170,9 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 			(result_plan->flow->flotype == FLOW_PARTITIONED ||
 			 result_plan->flow->locustype == CdbLocusType_SegmentGeneral))
 		{
-			if (result_plan->flow->flotype == FLOW_PARTITIONED)
+
+			if (result_plan->flow->flotype == FLOW_PARTITIONED &&
+				!limit_contain_volatile_functions)
 			{
 				/* pushdown the first phase of multi-phase limit (which takes offset into account) */
 				result_plan = pushdown_preliminary_limit(result_plan, parse->limitCount, count_est, parse->limitOffset, offset_est);

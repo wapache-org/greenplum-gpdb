@@ -283,7 +283,11 @@ ERROR_EXIT () {
 						$ECHO "$RM -f $BACKOUT_FILE" >> $BACKOUT_FILE
 				fi
 		fi
-		exit $2
+		if [ $IGNORE_WARNINGS -eq 1 ]; then
+				exit 1
+		else
+				exit $2
+		fi
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
 
@@ -515,12 +519,10 @@ CREATE_SPREAD_MIRROR_ARRAY () {
 		QE_M_NAME=`$ECHO ${QE_PRIMARY_ARRAY[$PRIM_SEG_INDEX]}|$AWK -F"~" '{print $1}'`
 		GP_M_DIR=${MIRROR_DATA_DIRECTORY[$SEGS_PROCESSED%$NUM_DATADIR]}
 		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $2}'`
-		P_REPL_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $6}'`
 		((GP_M_PORT=$P_PORT+$MIRROR_OFFSET))
-		((M_REPL_PORT=$P_REPL_PORT+$MIRROR_REPLICATION_PORT_OFFSET))
 		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $5}'`
 		M_SEG=`$ECHO $QE_LINE|$AWK -F"~" '{print $3}'|$AWK -F"/" '{print $NF}'`
-		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}/${M_SEG}~${DBID_COUNT}~${M_CONTENT}~${M_REPL_PORT})
+		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}/${M_SEG}~${DBID_COUNT}~${M_CONTENT})
 		POSTGRES_PORT_CHK $GP_M_PORT $QE_M_NAME
 		((DBID_COUNT=$DBID_COUNT+1))
 		((SEGS_PROCESSED=$SEGS_PROCESSED+1))
@@ -580,11 +582,9 @@ CREATE_GROUP_MIRROR_ARRAY () {
 
 		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $5}'`
 		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $2}'`
-		P_REPL_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $6}'`
 		GP_M_PORT=$(($P_PORT+$MIRROR_OFFSET))
-		M_REPL_PORT=$(($P_REPL_PORT+$MIRROR_REPLICATION_PORT_OFFSET))
 
-		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}~${DBID_COUNT}~${M_CONTENT}~${M_REPL_PORT})
+		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}~${DBID_COUNT}~${M_CONTENT})
 		POSTGRES_PORT_CHK $GP_M_PORT $QE_M_NAME
 
 		DBID_COUNT=$(($DBID_COUNT+1))
@@ -599,11 +599,11 @@ GET_REPLY () {
 	$ECHO -n "> "
 	read REPLY
 	if [ -z $REPLY ]; then
-		LOG_MSG "[WARN]:-User abort requested, Script Exits!" 1
+		LOG_MSG "[FATAL]:-User abort requested, Script Exits!" 1
 		exit 1
 	fi
 	if [ $REPLY != Y ] && [ $REPLY != y ]; then
-		LOG_MSG "[WARN]:-User abort requested, Script Exits!" 1
+		LOG_MSG "[FATAL]:-User abort requested, Script Exits!" 1
 		exit 1
 	fi
 }

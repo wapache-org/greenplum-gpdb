@@ -1612,6 +1612,32 @@ make_two_stage_agg_plan(PlannerInfo *root,
 	/* Marshal implicit results. Return explicit result. */
 	ctx->current_pathkeys = current_pathkeys;
 	ctx->querynode_changed = true;
+
+	/* Add the Repeat node if needed. */
+	if (result_plan != NULL &&
+		ctx->canonical_grpsets != NULL &&
+		ctx->canonical_grpsets->grpset_counts != NULL)
+	{
+		bool		need_repeat_node = false;
+		int			grpset_no;
+		int			repeat_count = 0;
+
+		for (grpset_no = 0; grpset_no < ctx->canonical_grpsets->ngrpsets; grpset_no++)
+		{
+			if (ctx->canonical_grpsets->grpset_counts[grpset_no] > 1)
+			{
+				need_repeat_node = true;
+				break;
+			}
+		}
+		if (ctx->canonical_grpsets->ngrpsets == 1)
+			repeat_count = ctx->canonical_grpsets->grpset_counts[0];
+
+		if (need_repeat_node)
+		{
+			result_plan = add_repeat_node(result_plan, repeat_count, 0);
+		}
+	}
 	return result_plan;
 }
 
@@ -1724,6 +1750,11 @@ make_three_stage_agg_plan(PlannerInfo *root, MppGroupContext *ctx)
 		List	   *rtable = NIL;
 		List	   *coplans = NIL;
 		List	   *coroots = NIL;
+		PlannerInfo *scroot = NULL; /* PlannerInfo for shared scan */
+
+		scroot = makeNode(PlannerInfo);
+		/* shallow copy from root at first. */
+		memcpy(scroot, root, sizeof(PlannerInfo));
 
 		if (ctx->use_sharing)
 		{
@@ -1749,6 +1780,16 @@ make_three_stage_agg_plan(PlannerInfo *root, MppGroupContext *ctx)
 			Plan	   *coplan;
 			Query	   *coquery;
 			PlannerInfo *coroot;
+
+			/*
+			 * For each distinct DQA, we need to build a coplan on base of the
+			 * shared scan plan. But for the DQA other than the first one, the
+			 * arrays for RelOptInfo and RangeTblEntry for the PlannerInfo have
+			 * been rebuilt. So we need to restore the arrays to what they are
+			 * like for the origin shared scan plan.
+			 */
+			if (i != 0)
+				memcpy(root, scroot, sizeof(PlannerInfo));
 
 			coplan = (Plan *) list_nth(share_partners, i);
 			coplan = make_plan_for_one_dqa(root, ctx, i,
@@ -2268,7 +2309,7 @@ make_plan_for_one_dqa(PlannerInfo *root, MppGroupContext *ctx, int dqa_index,
 			groups_sorted = true;
 			current_pathkeys = root->group_pathkeys;
 			mark_sort_locus(result_plan);
-			/* Fall though. */
+			/* fallthrough */
 
 		case DQACOPLAN_GGS:
 			aggstrategy = AGG_SORTED;
@@ -4796,8 +4837,21 @@ cost_common_agg(PlannerInfo *root, MppGroupContext *ctx, AggPlanInfo *info, Plan
 
 	Assert(dummy != NULL);
 
-	input_rows = info->input_path->parent->rows;
-	input_width = info->input_path->parent->width;
+	/*
+	 * For Result pathnode, its parent would be set to NULL. In that case, we
+	 * can use the rows in the Path and use 0 as the width.
+	 */
+	if (info->input_path->parent)
+	{
+		input_rows = info->input_path->parent->rows;
+		input_width = info->input_path->parent->width;
+	}
+	else
+	{
+		input_rows = info->input_path->rows;
+		input_width = 0;
+	}
+
 	/* Path input width isn't correct for ctx->sub_tlist so we guess. */
 	n = 32 * list_length(ctx->sub_tlist);
 	input_width = (input_width < n) ? input_width : n;

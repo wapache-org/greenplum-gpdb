@@ -1095,7 +1095,7 @@ If you want to review or change any of your installation settings, click Back. C
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder" Name="PFiles">
         <Directory Id="gpdir" Name="Greenplum">
-          <Directory Id="BASEDIR" Name="greenplum-clients-$(var.VERSION)" ShortName="bizgres1">
+          <Directory Id="BASEDIR" Name="greenplum-clients" ShortName="bizgres1">
             <Component Id="TOPLEVELTextFiles" DiskId="1" Guid="CBED1D6A-228F-4AD2-AAD3-198B42323A22">
               <Environment Id="CLIENTS_ENV" Action="set" Permanent="no" System="yes" Part="all" Name="GPHOME_CLIENTS" Value="[BASEDIR]" />
               <Environment Id="PYTHON_ENV" Action="set" Permanent="no" System="yes" Part="last" Name="PYTHONPATH" Value="%GPHOME_CLIENTS%\lib\python" />
@@ -1103,6 +1103,7 @@ If you want to review or change any of your installation settings, click Back. C
               <File Id="greenplum_clients_path.bat" Name="greenplum_clients_path.bat" ShortName="BIZGRES1.BAT" Source="$(var.SRCDIR)\greenplum_clients_path.bat" />
               <File Id="LICENSE" Name="Pivotal License" ShortName="LICENSE" Source="$(var.SRCDIR)\LICENSE" />
               <File Id="NOTICE" Name="Thirdpary Notice" ShortName="NOTICE" Source="$(var.SRCDIR)\NOTICE" />
+              <File Id="VERSION" Name="GPDB Clients Version" ShortName="VERSION" Source="$(var.SRCDIR)\VERSION" />
             </Component>
             <Directory Id="TOPLEVELbin" Name="bin">
               <Component Id="TOPLEVELbin" DiskId="1" Guid="33133D23-0F1E-4A52-B679-D57D0A7DF727">
@@ -1118,6 +1119,10 @@ If you want to review or change any of your installation settings, click Back. C
                 <File Id="dropuser.exe" Name="dropuser.exe" Source="$(var.SRCDIR)\bin\dropuser.exe" />
                 <File Id="libapr.dll" Name="libapr-1.dll" Source="$(var.SRCDIR)\bin\libapr-1.dll" />
                 <File Id="libpq.dll" Name="libpq.dll" Source="$(var.SRCDIR)\bin\libpq.dll" />
+                <File Id="krbcc64.dll" Name="krbcc64.dll" Source="$(var.SRCDIR)\bin\krbcc64.dll" />
+                <File Id="kinit.exe" Name="kinit.exe" Source="$(var.SRCDIR)\bin\kinit.exe" />
+                <File Id="klist.exe" Name="klist.exe" Source="$(var.SRCDIR)\bin\klist.exe" />
+                <File Id="kdestroy.exe" Name="kdestroy.exe" Source="$(var.SRCDIR)\bin\kdestroy.exe" />
                 <File Id="comerr64.dll" Name="comerr64.dll" Source="$(var.SRCDIR)\bin\comerr64.dll" />
                 <File Id="gssapi64.dll" Name="gssapi64.dll" Source="$(var.SRCDIR)\bin\gssapi64.dll" />
                 <File Id="k5sprt64.dll" Name="k5sprt64.dll" Source="$(var.SRCDIR)\bin\k5sprt64.dll" />
@@ -1128,6 +1133,12 @@ If you want to review or change any of your installation settings, click Back. C
                 <File Id="gpload.py" Name="gpload.py" Source="$(var.SRCDIR)\bin\gpload.py" />
                 <File Id="gpload.bat" Name="gpload.bat" Source="$(var.SRCDIR)\bin\gpload.bat" />
               </Component>
+              <Directory Id="GPPYlib" Name="gppylib">
+                <Component Id="GPPYlib" DiskId="1" Guid="C246C9E7-7251-44CE-A638-7F5C984F158D">
+                  <File Id="__init__.py.gppylib" Name="__init__.py" Source="$(var.SRCDIR)\bin\gppylib\__init__.py" />
+                  <File Id="gpversion.py" Name="gpversion.py" Source="$(var.SRCDIR)\bin\gppylib\gpversion.py" />
+                </Component>
+              </Directory>
             </Directory>
             <Directory Id="TOPLEVELlib" Name="lib">
               <Directory Id="PYTHONlib" Name="python">
@@ -1171,6 +1182,7 @@ If you want to review or change any of your installation settings, click Back. C
       <ComponentRef Id="TOPLEVELTextFiles" />
       <Feature Id="psql" Level="1" Title="Greenplum DB client command line tools" Description="Greenplum DB client command line tools" AllowAdvertise="no" Display="expand">
         <ComponentRef Id="TOPLEVELbin" />
+        <ComponentRef Id="GPPYlib" />
         <ComponentRef Id="PYGRESQLlib" />
         <ComponentRef Id="YAMLlib" />
       </Feature>

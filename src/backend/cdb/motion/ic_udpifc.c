@@ -177,7 +177,6 @@ struct ConnHashTable
 	int			size;
 };
 
-#define DEFAULT_CONN_HTAB_SIZE 16
 #define CONN_HASH_VALUE(icpkt) ((uint32)((((icpkt)->srcPid ^ (icpkt)->dstPid)) + (icpkt)->dstContentId))
 #define CONN_HASH_MATCH(a, b) (((a)->motNodeId == (b)->motNodeId && \
 								(a)->dstContentId == (b)->dstContentId && \
@@ -1340,6 +1339,53 @@ initMutex(pthread_mutex_t *mutex)
 }
 
 /*
+ * Set up the udp interconnect pthread signal mask, we don't want to run our signal handlers
+ */
+static void
+ic_set_pthread_sigmasks(sigset_t *old_sigs)
+{
+#ifndef WIN32
+	sigset_t sigs;
+	int		 err;
+
+	sigemptyset(&sigs);
+
+	/* make our thread ignore these signals (which should allow that
+	 * they be delivered to the main thread) */
+	sigaddset(&sigs, SIGHUP);
+	sigaddset(&sigs, SIGINT);
+	sigaddset(&sigs, SIGTERM);
+	sigaddset(&sigs, SIGALRM);
+	sigaddset(&sigs, SIGUSR1);
+	sigaddset(&sigs, SIGUSR2);
+
+	err = pthread_sigmask(SIG_BLOCK, &sigs, old_sigs);
+	if (err != 0)
+		elog(ERROR, "Failed to get pthread signal masks with return value: %d", err);
+#else
+	(void) old_sigs;
+#endif
+
+	return;
+}
+
+static void
+ic_reset_pthread_sigmasks(sigset_t *sigs)
+{
+#ifndef WIN32
+	int err;
+
+	err = pthread_sigmask(SIG_SETMASK, sigs, NULL);
+	if (err != 0)
+		elog(ERROR, "Failed to reset pthread signal masks with return value: %d", err);
+#else
+	(void) sigs;
+#endif
+
+	return;
+}
+
+/*
  * InitMotionUDPIFC
  * 		Initialize UDP specific comms, and create rx-thread.
  */
@@ -1351,7 +1397,8 @@ InitMotionUDPIFC(int *listenerSocketFd, uint16 *listenerPort)
 
 	/* attributes of the thread we're creating */
 	pthread_attr_t t_atts;
-	MemoryContext old;
+	sigset_t	   pthread_sigs;
+	MemoryContext  old;
 
 #ifdef USE_ASSERT_CHECKING
 	set_test_mode();
@@ -1421,7 +1468,9 @@ InitMotionUDPIFC(int *listenerSocketFd, uint16 *listenerPort)
 	pthread_attr_init(&t_atts);
 
 	pthread_attr_setstacksize(&t_atts, Max(PTHREAD_STACK_MIN, (128 * 1024)));
+	ic_set_pthread_sigmasks(&pthread_sigs);
 	pthread_err = pthread_create(&ic_control_info.threadHandle, &t_atts, rxThreadFunc, NULL);
+	ic_reset_pthread_sigmasks(&pthread_sigs);
 
 	pthread_attr_destroy(&t_atts);
 	if (pthread_err != 0)
@@ -1512,7 +1561,8 @@ initConnHashTable(ConnHashTable *ht, MemoryContext cxt)
 	int			i;
 
 	ht->cxt = cxt;
-	ht->size = DEFAULT_CONN_HTAB_SIZE;
+	ht->size = Gp_role == GP_ROLE_DISPATCH ? (getgpsegmentCount() * 2) : ic_htab_size;
+	Assert(ht->size > 0);
 
 	if (ht->cxt)
 	{
@@ -2440,8 +2490,7 @@ initUnackQueueRing(UnackQueueRing *uqr)
 {
 	int			i = 0;
 
-	uqr->currentTime = getCurrentTime();
-	uqr->currentTime = uqr->currentTime - (uqr->currentTime % TIMER_SPAN);
+	uqr->currentTime = 0;
 	uqr->idx = 0;
 	uqr->numOutStanding = 0;
 	uqr->numSharedOutStanding = 0;
@@ -2548,6 +2597,10 @@ getSndBuffer(MotionConn *conn)
 	{
 		if (snd_buffer_pool.count < snd_buffer_pool.maxCount)
 		{
+			MemoryContext oldContext;
+
+			oldContext = MemoryContextSwitchTo(InterconnectContext);
+
 			ret = (ICBuffer *) palloc0(Gp_max_packet_size + sizeof(ICBuffer));
 			snd_buffer_pool.count++;
 			ret->conn = NULL;
@@ -2555,6 +2608,8 @@ getSndBuffer(MotionConn *conn)
 			icBufferListInitHeadLink(&ret->primary);
 			icBufferListInitHeadLink(&ret->secondary);
 			ret->unackQueueRingSlot = 0;
+
+			MemoryContextSwitchTo(oldContext);
 		}
 		else
 		{
@@ -3068,7 +3123,7 @@ SetupUDPIFCInterconnect_Internal(SliceTable *sliceTable)
 				conn->pkt_q_head = 0;
 				conn->pkt_q_tail = 0;
 
-				SIMPLE_FAULT_INJECTOR(InterconnectSetupPalloc);
+				SIMPLE_FAULT_INJECTOR("interconnect_setup_palloc");
 				conn->pkt_q = (uint8 **) palloc0(conn->pkt_q_capacity * sizeof(uint8 *));
 
 				/* update the max buffer count of our rx buffer pool.  */
@@ -3166,6 +3221,7 @@ SetupUDPIFCInterconnect_Internal(SliceTable *sliceTable)
 	interconnect_context->activated = true;
 
 	pthread_mutex_unlock(&ic_control_info.lock);
+
 	return interconnect_context;
 }
 
@@ -3192,7 +3248,30 @@ SetupUDPIFCInterconnect(EState *estate)
 	}
 	PG_CATCH();
 	{
+		/*
+		 * Remove connections from hash table to avoid packet handling in the
+		 * rx pthread, else the packet handling code could use memory whose
+		 * context (InterconnectContext) would be soon reset - that could
+		 * panic the process.
+		 */
+		ConnHashTable *ht = &ic_control_info.connHtab;
+
+		for (int i = 0; i < ht->size; i++)
+		{
+			struct ConnHtabBin *trash;
+			MotionConn *conn;
+
+			trash = ht->table[i];
+			while (trash != NULL)
+			{
+				conn = trash->conn;
+				/* Get trash at first as trash will be pfree-ed in connDelHash. */
+				trash = trash->next;
+				connDelHash(ht, conn);
+			}
+		}
 		pthread_mutex_unlock(&ic_control_info.lock);
+
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -3200,6 +3279,10 @@ SetupUDPIFCInterconnect(EState *estate)
 	icContext->estate = estate;
 	estate->interconnect_context = icContext;
 	estate->es_interconnect_is_setup = true;
+
+	/* Check if any of the QEs has already finished with error */
+	if (Gp_role == GP_ROLE_DISPATCH)
+		checkForCancelFromQD(icContext);
 }
 
 
@@ -3749,8 +3832,8 @@ receiveChunksUDPIFC(ChunkTransportState *pTransportStates, ChunkTransportStateEn
 			checkQDConnectionAlive();
 
 			if (!PostmasterIsAlive())
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
+				ereport(FATAL,
+						(errcode(ERRCODE_GP_INTERCONNECTION_ERROR),
 						 errmsg("interconnect failed to recv chunks"),
 						 errdetail("Postmaster is not alive.")));
 		}
@@ -5003,6 +5086,7 @@ checkExpiration(ChunkTransportState *transportStates,
 	int			count = 0;
 	int			retransmits = 0;
 
+	Assert(unack_queue_ring.currentTime != 0);
 	while (now >= (unack_queue_ring.currentTime + TIMER_SPAN) && count++ < UNACK_QUEUE_RING_SLOTS_NUM)
 	{
 		/* expired, need to resend them */
@@ -5254,8 +5338,8 @@ checkExceptions(ChunkTransportState *transportStates,
 		checkQDConnectionAlive();
 
 		if (!PostmasterIsAlive())
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
+			ereport(FATAL,
+					(errcode(ERRCODE_GP_INTERCONNECTION_ERROR),
 					 errmsg("interconnect failed to send chunks"),
 					 errdetail("Postmaster is not alive.")));
 	}
@@ -5612,7 +5696,7 @@ doSendStopMessageUDPIFC(ChunkTransportState *transportStates, int16 motNodeID)
 
 #ifdef FAULT_INJECTOR
 				if (FaultInjector_InjectFaultIfSet(
-												   InterconnectStopAckIsLost,
+												   "interconnect_stop_ack_is_lost",
 												   DDLNotSpecified,
 												   "" /* databaseName */ ,
 												   "" /* tableName */ ) == FaultInjectorTypeSkip)
@@ -5840,9 +5924,14 @@ getCurrentTime(void)
 static void
 putIntoUnackQueueRing(UnackQueueRing *uqr, ICBuffer *buf, uint64 expTime, uint64 now)
 {
-	uint64		diff = now + expTime - uqr->currentTime;
+	uint64		diff = 0;
 	int			idx = 0;
 
+	/* The first packet, currentTime is not initialized */
+	if (uqr->currentTime == 0)
+		uqr->currentTime = now - (now % TIMER_SPAN);
+
+	diff = now + expTime - uqr->currentTime;
 	if (diff >= UNACK_QUEUE_RING_LENGTH)
 	{
 #ifdef AMS_VERBOSE_LOGGING
@@ -6116,8 +6205,6 @@ rxThreadFunc(void *arg)
 	icpkthdr   *pkt = NULL;
 	bool		skip_poll = false;
 	uint32		expected = 1;
-
-	gp_set_thread_sigmasks();
 
 	for (;;)
 	{

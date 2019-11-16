@@ -96,9 +96,8 @@ extractPageMap(const char *datadir, XLogRecPtr startpoint, TimeLineID tli,
 						 (uint32) (errptr >> 32), (uint32) (errptr),
 						 errormsg);
 			else
-				pg_fatal("could not read WAL record at %X/%X\n",
-						 (uint32) (startpoint >> 32),
-						 (uint32) (startpoint));
+				pg_fatal("could not read WAL record at %X/%X",
+						 (uint32) (errptr >> 32), (uint32) (errptr));
 		}
 
 		extractPageInfo(record);
@@ -946,6 +945,7 @@ extractPageInfo(XLogRecord *record)
 					fprintf(stderr, "unrecognized dbase record type %d\n", info);
 					exit(1);
 			}
+			break;
 
 		case RM_TBLSPC_ID:
 			switch (info)

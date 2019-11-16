@@ -31,6 +31,7 @@
 
 #include "postgres.h"
 
+#include "miscadmin.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
 #include "catalog/gp_policy.h"
@@ -1226,7 +1227,6 @@ _equalCreateStmt(const CreateStmt *a, const CreateStmt *b)
 	COMPARE_NODE_FIELD(distributedBy);
 	COMPARE_SCALAR_FIELD(relKind);
 	COMPARE_SCALAR_FIELD(relStorage);
-	/* postCreate omitted */
 	/* deferredStmts omitted */
 	COMPARE_SCALAR_FIELD(is_part_child);
 	COMPARE_SCALAR_FIELD(is_add_part);
@@ -1851,6 +1851,7 @@ _equalAlterExtensionStmt(const AlterExtensionStmt *a, const AlterExtensionStmt *
 {
 	COMPARE_STRING_FIELD(extname);
 	COMPARE_NODE_FIELD(options);
+	COMPARE_SCALAR_FIELD(update_ext_state);
 
 	return true;
 }
@@ -2836,6 +2837,9 @@ equal(const void *a, const void *b)
 	 */
 	if (nodeTag(a) != nodeTag(b))
 		return false;
+
+	/* Guard against stack overflow due to overly complex expressions */
+	check_stack_depth();
 
 	switch (nodeTag(a))
 	{

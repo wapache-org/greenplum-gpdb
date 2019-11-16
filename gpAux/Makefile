@@ -40,7 +40,6 @@ all : devel
 BLD_TOP:=$(shell sh -c pwd)
 include Makefile.global
 include Makefile.thirdparty
-include releng/releng.mk
 
 ifneq "$(BLD_BITS)" ""
 export NO_M64=1
@@ -130,14 +129,14 @@ APR_CONFIG=--with-apr-config=$(BLD_THIRDPARTY_BIN_DIR)/apr-1-config
 endif
 
 aix7_ppc_64_CONFIGFLAGS=--disable-gpcloud --without-readline --without-libcurl --disable-orca --disable-pxf --without-zstd $(APR_CONFIG)
-rhel6_x86_64_CONFIGFLAGS=--with-quicklz --enable-tap-tests --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
-rhel7_x86_64_CONFIGFLAGS=--with-quicklz --enable-tap-tests --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
+rhel6_x86_64_CONFIGFLAGS=--with-quicklz  --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
+rhel7_x86_64_CONFIGFLAGS=--with-quicklz  --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
 linux_x86_64_CONFIGFLAGS=${ORCA_CONFIG} --with-libxml $(APR_CONFIG)
-ubuntu18.04_x86_64_CONFIGFLAGS=--with-quicklz --enable-tap-tests --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
+ubuntu18.04_x86_64_CONFIGFLAGS=--with-quicklz  --enable-gpperfmon --with-gssapi --enable-mapreduce --enable-orafce ${ORCA_CONFIG} --with-libxml $(APU_CONFIG)
 
 BLD_CONFIGFLAGS=$($(BLD_ARCH)_CONFIGFLAGS)
 
-CONFIGFLAGS=$(strip $(BLD_CONFIGFLAGS) --with-pgport=$(DEFPORT) --with-libedit-preferred $(BLD_DEPLOYMENT_SETTING))
+CONFIGFLAGS=$(strip $(BLD_CONFIGFLAGS) --with-pgport=$(DEFPORT) $(BLD_DEPLOYMENT_SETTING))
 
 ifdef CONFIGURE_FLAGS
 CONFIGFLAGS+= $(CONFIGURE_FLAGS)
@@ -256,7 +255,6 @@ define BUILD_STEPS
 	#@$(MAKE) greenplum_path INSTLOC=$(INSTLOC)
 	#@$(MAKE) mgmtcopy INSTLOC=$(INSTLOC)
 	@$(MAKE) mkpgbouncer INSTLOC=$(INSTLOC) BUILDDIR=$(BUILDDIR)
-	@$(MAKE) mkpgbench INSTLOC=$(INSTLOC) BUILDDIR=$(BUILDDIR)
 	@$(MAKE) copydocs INSTLOC=$(INSTLOC)
 	@$(MAKE) copylibs INSTLOC=$(INSTLOC)
 	@$(MAKE) clients INSTLOC=$(INSTLOC) CLIENTSINSTLOC=$(CLIENTSINSTLOC)
@@ -350,9 +348,6 @@ devel : gccVersionCheck HOMEDEP $(ISCONFIG)
 endif
 	$(BUILD_STEPS)
 
-ifneq "$(findstring $(BLD_GPDB_BUILDSET),partial aix_subset)" ""
-	@$(MAKE) qautils-tarball INSTLOC=$(INSTLOC)
-endif
 #---------------------------------------------------------------------
 # Release builds
 #---------------------------------------------------------------------
@@ -619,9 +614,6 @@ set_scripts_version :
 # Internal functions
 #---------------------------------------------------------------------
 
-mkpgbench:
-	@cd $(BUILDDIR)/contrib/pgbench && $(MAKE) install
-
 mkpgbouncer:
 ifeq "$(shell uname -s)" "Darwin"
 	echo "pgbouncer can't build on Mac"
@@ -658,8 +650,6 @@ mgmtcopy :
 	cp -rp $(GPMGMT)/bin/ext/* $(INSTLOC)/lib/python
 	cp -rp $(GPMGMT)/bin $(INSTLOC)
 	cp -rp $(GPMGMT)/sbin/* $(INSTLOC)/sbin/.
-	cp $(GPPGDIR)/src/test/regress/*.pl $(INSTLOC)/bin
-	cp $(GPPGDIR)/src/test/regress/*.pm $(INSTLOC)/bin
 	if [ ! -d ${INSTLOC}/docs ] ; then mkdir ${INSTLOC}/docs ; fi
 	if [ -d $(GPMGMT)/doc ]; then cp -rp $(GPMGMT)/doc $(INSTLOC)/docs/cli_help; fi
 	if [ -d $(GPMGMT)/demo/gpmapreduce ]; then \
@@ -733,14 +723,6 @@ HOMEFAIL :
 	@echo "	The HOME environment variable is not set. Please set it to continue."
 	@echo
 	@exit 1
-
-##
-## Create qautils tarball.  This file contains the utils required to
-## support cdbfast runs.
-##
-
-qautils-tarball:
-	@$(TAR) -zcf releng/qautils-$(MPP_ARCH).tar.gz -C $(INSTLOC) $(shell cat releng/QAUTILS_FILES.txt)
 
 #---------------------------------------------------------------------
 # Cleanup

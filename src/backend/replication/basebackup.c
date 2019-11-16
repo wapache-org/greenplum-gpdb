@@ -240,7 +240,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 	 */
 	WalSndSetXLogCleanUpTo(startptr);
 
-	SIMPLE_FAULT_INJECTOR(BaseBackupPostCreateCheckpoint);
+	SIMPLE_FAULT_INJECTOR("base_backup_post_create_checkpoint");
 
 	/*
 	 * Once do_pg_start_backup has been called, ensure that any failure causes
@@ -1251,6 +1251,7 @@ sendDir(char *path, int basepathlen, bool sizeonly, List *tablespaces,
 				ereport(ERROR,
 						(errmsg("symbolic link \"%s\" target is too long",
 								pathbuf)));
+			linkpath[rllen] = '\0';
 
 			/* Lop off the dbid before sending the link target. */
 			char *file_sep_before_dbid_in_link_path = strrchr(linkpath, '/');

@@ -124,12 +124,18 @@ struct ResGroupProcData
 {
 	Oid		groupId;
 
+	int32	memUsage;			/* memory usage of current proc */
+	/* 
+	 * Record current bypass memory limit for each bypass queries.
+	 * For bypass mode, memUsage of current process could accumulate in a session.
+	 * So should limit the memory usage for each query instead of the whole session.
+	 */
+	int32	bypassMemoryLimit;
+
 	ResGroupData		*group;
 	ResGroupSlotData	*slot;
 
 	ResGroupCaps	caps;
-
-	int32	memUsage;			/* memory usage of current proc */
 };
 
 /*
@@ -144,13 +150,13 @@ struct ResGroupSlotData
 {
 	Oid				groupId;
 
-	ResGroupCaps	caps;
-
 	int32			memQuota;	/* memory quota of current slot */
 	int32			memUsage;	/* total memory usage of procs belongs to this slot */
 	int				nProcs;		/* number of procs in this slot */
 
 	ResGroupSlotData	*next;
+
+	ResGroupCaps	caps;
 };
 
 /*
@@ -174,15 +180,6 @@ typedef struct ResGroupMemOperations
 struct ResGroupData
 {
 	Oid			groupId;		/* Id for this group */
-	ResGroupCaps	caps;		/* capabilities of this group */
-	volatile int			nRunning;		/* number of running trans */
-	volatile int	nRunningBypassed;		/* number of running trans in bypass mode */
-	PROC_QUEUE	waitProcs;		/* list of PGPROC objects waiting on this group */
-	int			totalExecuted;	/* total number of executed trans */
-	int			totalQueued;	/* total number of queued trans	*/
-	Interval	totalQueuedTime;/* total queue time */
-
-	bool		lockedForDrop;  /* true if resource group is dropped but not committed yet */
 
 	/*
 	 * memGap is calculated as:
@@ -207,32 +204,43 @@ struct ResGroupData
 	volatile int32	memUsage;
 	volatile int32	memSharedUsage;
 
+	volatile int			nRunning;		/* number of running trans */
+	volatile int	nRunningBypassed;		/* number of running trans in bypass mode */
+	int			totalExecuted;	/* total number of executed trans */
+	int			totalQueued;	/* total number of queued trans	*/
+	Interval	totalQueuedTime;/* total queue time */
+	PROC_QUEUE	waitProcs;		/* list of PGPROC objects waiting on this group */
+
 	/*
 	 * operation functions for resource group
 	 */
 	const ResGroupMemOperations *groupMemOps;
+
+	bool		lockedForDrop;  /* true if resource group is dropped but not committed yet */
+
+	ResGroupCaps	caps;		/* capabilities of this group */
 };
 
 struct ResGroupControl
 {
-	HTAB			*htbl;
-	int 			segmentsOnMaster;
-
-	/*
-	 * The hash table for resource groups in shared memory should only be populated
-	 * once, so we add a flag here to implement this requirement.
-	 */
-	bool			loaded;
-
 	int32			totalChunks;	/* total memory chunks on this segment */
 	volatile int32	freeChunks;		/* memory chunks not allocated to any group,
 									will be used for the query which group share
 									memory is not enough*/
 
 	int32			chunkSizeInBits;
+	int 			segmentsOnMaster;
 
 	ResGroupSlotData	*slots;		/* slot pool shared by all resource groups */
 	ResGroupSlotData	*freeSlot;	/* head of the free list */
+
+	HTAB			*htbl;
+
+	/*
+	 * The hash table for resource groups in shared memory should only be populated
+	 * once, so we add a flag here to implement this requirement.
+	 */
+	bool			loaded;
 
 	int				nGroups;
 	ResGroupData	groups[1];
@@ -344,7 +352,6 @@ static void resgroupDumpFreeSlots(StringInfo str);
 
 static void sessionSetSlot(ResGroupSlotData *slot);
 static ResGroupSlotData *sessionGetSlot(void);
-static void sessionResetSlot(void);
 
 static void bindGroupOperation(ResGroupData *group);
 static void groupMemOnAlterForVmtracker(Oid groupId, ResGroupData *group);
@@ -1134,10 +1141,7 @@ ResGroupReserveMemory(int32 memoryChunks, int32 overuseChunks, bool *waiverUsed)
 		/*
 		 * Do not allow to allocate more than the per proc limit.
 		 */
-		if ((Gp_role == GP_ROLE_DISPATCH &&
-			 self->memUsage > RESGROUP_BYPASS_MODE_MEMORY_LIMIT_ON_QD) ||
-			(Gp_role == GP_ROLE_EXECUTE &&
-			 self->memUsage > RESGROUP_BYPASS_MODE_MEMORY_LIMIT_ON_QE))
+		if (self->memUsage > self->bypassMemoryLimit)
 		{
 			self->memUsage -= memoryChunks;
 			return false;
@@ -1607,7 +1611,6 @@ groupPutSlot(ResGroupData *group, ResGroupSlotData *slot)
 	int32		released;
 
 	Assert(LWLockHeldExclusiveByMe(ResGroupLock));
-	Assert(Gp_role == GP_ROLE_DISPATCH);
 	Assert(group->memQuotaUsed >= 0);
 	Assert(slotIsInUse(slot));
 
@@ -1617,6 +1620,13 @@ groupPutSlot(ResGroupData *group, ResGroupSlotData *slot)
 	/* Return the slot back to free list */
 	slotpoolFreeSlot(slot);
 	group->nRunning--;
+
+	/*
+	 * Reset resource group slot for current session. Note MySessionState
+	 * could be reset as NULL in shmem_exit() before calling this function.
+	 */
+	if (MySessionState != NULL)
+		MySessionState->resGroupSlot = NULL;
 
 	/* And finally release the overused memory quota */
 	released = mempoolAutoRelease(group);
@@ -2316,17 +2326,20 @@ static void
 groupReleaseSlot(ResGroupData *group, ResGroupSlotData *slot)
 {
 	Assert(LWLockHeldExclusiveByMe(ResGroupLock));
-	Assert(Gp_role == GP_ROLE_DISPATCH);
 	Assert(!selfIsAssigned());
 
 	groupPutSlot(group, slot);
 
 	/*
-	 * My slot is put back, then how many queuing queries should I wake up?
-	 * Maybe zero, maybe one, maybe more, depends on how the resgroup's
-	 * configuration were changed during our execution.
+	 * We should wake up other pending queries on master nodes.
 	 */
-	wakeupSlots(group, true);
+	if (IS_QUERY_DISPATCHER())
+		/*
+		 * My slot is put back, then how many queuing queries should I wake up?
+		 * Maybe zero, maybe one, maybe more, depends on how the resgroup's
+		 * configuration were changed during our execution.
+		 */
+		wakeupSlots(group, true);
 }
 
 /*
@@ -2503,6 +2516,9 @@ AssignResGroupOnMaster(void)
 
 		/* Attach self memory usage to resgroup */
 		groupIncMemUsage(bypassedGroup, &bypassedSlot, self->memUsage);
+		
+		/* Record the bypass memory limit of current query */
+		self->bypassMemoryLimit = self->memUsage + RESGROUP_BYPASS_MODE_MEMORY_LIMIT_ON_QD;
 
 		/* Add into cgroup */
 		ResGroupOps_AssignGroup(bypassedGroup->groupId,
@@ -2532,7 +2548,7 @@ AssignResGroupOnMaster(void)
 		self->caps = slot->caps;
 
 		/* Don't error out before this line in this function */
-		SIMPLE_FAULT_INJECTOR(ResGroupAssignedOnMaster);
+		SIMPLE_FAULT_INJECTOR("resgroup_assigned_on_master");
 
 		/* Add into cgroup */
 		ResGroupOps_AssignGroup(self->groupId, &(self->caps), MyProcPid);
@@ -2575,6 +2591,9 @@ UnassignResGroup(void)
 		return;
 	}
 
+	if (Gp_role == GP_ROLE_EXECUTE && IS_QUERY_DISPATCHER())
+		SIMPLE_FAULT_INJECTOR("unassign_resgroup_start_entrydb");
+
 	if (!selfIsAssigned())
 		return;
 
@@ -2587,38 +2606,14 @@ UnassignResGroup(void)
 	/* Sub proc memory accounting info from group and slot */
 	selfDetachResGroup(group, slot);
 
-	if (Gp_role == GP_ROLE_DISPATCH)
-	{
-		/* Release the slot */
+	/* Release the slot if no reference. */
+	if (slot->nProcs == 0)
 		groupReleaseSlot(group, slot);
 
-		sessionResetSlot();
-	}
-	else if (slot->nProcs == 0)
-	{
-		int32 released;
-
-		Assert(Gp_role == GP_ROLE_EXECUTE);
-
-		group->memQuotaUsed -= slot->memQuota;
-
-		/* Release this slot back to slot pool */
-		slotpoolFreeSlot(slot);
-
-		/* Reset resource group slot for current session */
-		sessionResetSlot();
-
-		/* Decrease nRunning */
-		group->nRunning--;
-
-		/* And finally release the overused memory quota */
-		released = mempoolAutoRelease(group);
-		if (released > 0)
-			notifyGroupsOnMem(group->groupId);
-
-	}
-
 	LWLockRelease(ResGroupLock);
+
+	if (Gp_role == GP_ROLE_DISPATCH)
+		SIMPLE_FAULT_INJECTOR("unassign_resgroup_end_qd");
 
 	pgstat_report_resgroup(0, InvalidOid);
 }
@@ -2664,6 +2659,9 @@ SwitchResGroupOnSegment(const char *buf, int len)
 
 		/* Attach self memory usage to resgroup */
 		groupIncMemUsage(bypassedGroup, &bypassedSlot, self->memUsage);
+		
+		/* Record the bypass memory limit of current query */
+		self->bypassMemoryLimit = self->memUsage + RESGROUP_BYPASS_MODE_MEMORY_LIMIT_ON_QE;
 		return;
 	}
 
@@ -2945,7 +2943,6 @@ groupWaitCancel(void)
 		 * wake up depends on how many slots we can get.
 		 */
 		groupReleaseSlot(group, slot);
-		Assert(sessionGetSlot() == NULL);
 
 		group->totalExecuted++;
 
@@ -2974,6 +2971,10 @@ static void
 groupSetMemorySpillRatio(const ResGroupCaps *caps)
 {
 	char value[64];
+
+	/* No need to set memory_spill_ratio if it is already up-to-date */
+	if (caps->memSpillRatio == memory_spill_ratio)
+		return;
 
 	snprintf(value, sizeof(value), "%d", caps->memSpillRatio);
 	set_config_option("memory_spill_ratio", value, PGC_USERSET, PGC_S_RESGROUP,
@@ -3439,10 +3440,12 @@ groupWaitQueueFind(ResGroupData *group, const PGPROC *proc)
 static bool
 shouldBypassQuery(const char *query_string)
 {
-	MemoryContext oldcontext;
+	MemoryContext oldcontext = NULL;
+	MemoryContext tmpcontext = NULL;
 	List *parsetree_list; 
 	ListCell *parsetree_item;
 	Node *parsetree;
+	bool		bypass;
 
 	if (gp_resource_group_bypass)
 		return true;
@@ -3452,8 +3455,27 @@ shouldBypassQuery(const char *query_string)
 
 	/*
 	 * Switch to appropriate context for constructing parsetrees.
+	 *
+	 * It is possible that MessageContext is NULL, for example in a bgworker:
+	 *
+	 *     debug_query_string = "select 1";
+	 *     StartTransactionCommand();
+	 *
+	 * This is not the recommended order of setting debug_query_string, but we
+	 * should not put a constraint on the order by resource group anyway.
 	 */
-	oldcontext = MemoryContextSwitchTo(MessageContext);
+	if (MessageContext)
+		oldcontext = MemoryContextSwitchTo(MessageContext);
+	else
+	{
+		/* Create a temp memory context to prevent memory leaks */
+		tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
+										   "resgroup temporary context",
+										   ALLOCSET_DEFAULT_MINSIZE,
+										   ALLOCSET_DEFAULT_INITSIZE,
+										   ALLOCSET_DEFAULT_MAXSIZE);
+		oldcontext = MemoryContextSwitchTo(tmpcontext);
+	}
 
 	parsetree_list = pg_parse_query(query_string);
 
@@ -3463,16 +3485,25 @@ shouldBypassQuery(const char *query_string)
 		return false;
 
 	/* Only bypass SET/RESET/SHOW command for now */
+	bypass = true;
 	foreach(parsetree_item, parsetree_list)
 	{
 		parsetree = (Node *) lfirst(parsetree_item);
 
 		if (nodeTag(parsetree) != T_VariableSetStmt &&
 			nodeTag(parsetree) != T_VariableShowStmt)
-			return false;
+		{
+			bypass = false;
+			break;
+		}
 	}
 
-	return true;
+	list_free_deep(parsetree_list);
+
+	if (tmpcontext)
+		MemoryContextDelete(tmpcontext);
+
+	return bypass;
 }
 
 /*
@@ -3655,18 +3686,10 @@ sessionSetSlot(ResGroupSlotData *slot)
 static ResGroupSlotData *
 sessionGetSlot(void)
 {
-	return (ResGroupSlotData *) MySessionState->resGroupSlot;
-}
-
-/*
- * Reset resource group slot to NULL for current session.
- */
-static void
-sessionResetSlot(void)
-{
-	Assert(MySessionState->resGroupSlot != NULL);
-
-	MySessionState->resGroupSlot = NULL;
+	if (MySessionState == NULL)
+		return NULL;
+	else
+		return (ResGroupSlotData *) MySessionState->resGroupSlot;
 }
 
 /*

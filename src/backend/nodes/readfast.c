@@ -462,6 +462,7 @@ _readConstraint(void)
 			 */
 			READ_BOOL_FIELD(skip_validation);
 			READ_BOOL_FIELD(is_no_inherit);
+			/* fallthrough */
 		case CONSTR_DEFAULT:
 			READ_NODE_FIELD(raw_expr);
 			READ_STRING_FIELD(cooked_expr);
@@ -1064,7 +1065,6 @@ _readCreateStmt_common(CreateStmt *local_node)
 	READ_NODE_FIELD(distributedBy);
 	READ_CHAR_FIELD(relKind);
 	READ_CHAR_FIELD(relStorage);
-	/* postCreate - for analysis, QD only */
 	/* deferredStmts - for analysis, QD only */
 	READ_BOOL_FIELD(is_part_child);
 	READ_BOOL_FIELD(is_part_parent);
@@ -2665,7 +2665,7 @@ _readAlterExtensionStmt(void)
 	READ_LOCALS(AlterExtensionStmt);
 	READ_STRING_FIELD(extname);
 	READ_NODE_FIELD(options);
-
+	READ_ENUM_FIELD(update_ext_state, UpdateExtensionState);
 	READ_DONE();
 }
 

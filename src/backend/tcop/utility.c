@@ -740,7 +740,7 @@ standard_ProcessUtility(Node *parsetree,
 					ereport(ERROR, (errcode(ERRCODE_GP_COMMAND_ERROR),
 							errmsg("unlisten command cannot run in a function running on a segDB")));
 
-				PreventCommandDuringRecovery("UNLISTEN");
+				/* we allow UNLISTEN during recovery, as it's a noop */
 				CheckRestrictedOperation("UNLISTEN");
 				if (stmt->conditionname)
 					Async_Unlisten(stmt->conditionname);
@@ -1159,8 +1159,6 @@ ProcessUtilitySlow(Node *parsetree,
 							 * one needs a secondary relation too.
 							 */
 							CommandCounterIncrement();
-
-							DefinePartitionedRelation((CreateStmt *) parsetree, relOid);
 
 							if (relKind != RELKIND_COMPOSITE_TYPE)
 							{
@@ -1595,15 +1593,6 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_RuleStmt:	/* CREATE RULE */
 				DefineRule((RuleStmt *) parsetree, queryString);
-				if (Gp_role == GP_ROLE_DISPATCH)
-				{
-					CdbDispatchUtilityStatement((Node *) parsetree,
-												DF_CANCEL_ON_ERROR|
-												DF_WITH_SNAPSHOT|
-												DF_NEED_TWO_PHASE,
-												GetAssignedOidsForDispatch(),
-												NULL);
-				}
 				break;
 
 			case T_CreateSeqStmt:

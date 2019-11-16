@@ -450,7 +450,7 @@ StartLogStreamer(char *startpos, uint32 timeline, char *sysidentifier)
 	snprintf(statusdir, sizeof(statusdir), "%s/pg_xlog/archive_status",
 			 basedir);
 
-	if (pg_mkdir_p(statusdir, S_IRWXU) != 0 && errno != EEXIST)
+	if (pg_mkdir_p(statusdir, S_IRWXU) != 0)
 	{
 		fprintf(stderr,
 				_("%s: could not create directory \"%s\": %s\n"),
@@ -538,6 +538,7 @@ verify_dir_is_empty_or_create(char *dirname)
 					_("%s: directory \"%s\" exists but is not empty\n"),
 					progname, dirname);
 			disconnect_and_exit(1);
+			break;
 		case -1:
 
 			/*
@@ -2462,7 +2463,7 @@ main(int argc, char **argv)
 			exit(1);
 		}
 #else
-		fprintf(stderr, _("%s: symlinks are not supported on this platform\n"));
+		fprintf(stderr, _("%s: symlinks are not supported on this platform\n"), progname);
 		exit(1);
 #endif
 		free(linkloc);

@@ -1821,7 +1821,6 @@ typedef struct CreateStmt
 	Node       *partitionBy;     /* what columns we partition the data by */
 	char	    relKind;         /* CDB: force relkind to this */
 	char		relStorage;
-	Node       *postCreate;      /* CDB: parse and process after the CREATE */
 	List	   *deferredStmts;	/* CDB: Statements, e.g., partial indexes, that can't be
 								 * analyzed until after CREATE (until the target table
 								 * is created and visible). */
@@ -2160,6 +2159,13 @@ typedef enum CreateExtensionState
 	CREATE_EXTENSION_END		/* finish to create extension */
 } CreateExtensionState;
 
+typedef enum UpdateExtensionState
+{
+	UPDATE_EXTENSION_INIT,		/* not start to update extension */
+	UPDATE_EXTENSION_BEGIN,     /* start to update extension */
+	UPDATE_EXTENSION_END		/* finish to update extension */
+} UpdateExtensionState;
+
 typedef struct CreateExtensionStmt
 {
 	NodeTag		type;
@@ -2175,6 +2181,7 @@ typedef struct AlterExtensionStmt
 	NodeTag		type;
 	char	   *extname;
 	List	   *options;		/* List of DefElem nodes */
+	UpdateExtensionState update_ext_state;	/* update extension state, only used for ALTER EXTENSION UPDATE */
 } AlterExtensionStmt;
 
 typedef struct AlterExtensionContentsStmt
@@ -2636,7 +2643,7 @@ typedef struct SecLabelStmt
  * This is used to request the planner to create a plan that's updatable with
  * CURRENT OF. It can be passed to SPI_prepare_cursor.
  */
-#define CURSOR_OPT_UPDATABLE	0x0040	/* updateable with CURRENT OF, if possible */
+#define CURSOR_OPT_UPDATABLE	0x0200	/* updateable with CURRENT OF, if possible */
 
 typedef struct DeclareCursorStmt
 {

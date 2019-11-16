@@ -86,16 +86,18 @@ DtxProtocolCommandToString(DtxProtocolCommand command)
 	{
 		case DTX_PROTOCOL_COMMAND_NONE:
 			return "None";
-		case DTX_PROTOCOL_COMMAND_STAY_AT_OR_BECOME_IMPLIED_WRITER:
-			return "Distributed Force Implied Writer";
 		case DTX_PROTOCOL_COMMAND_ABORT_NO_PREPARED:
 			return "Distributed Abort (No Prepared)";
 		case DTX_PROTOCOL_COMMAND_PREPARE:
 			return "Distributed Prepare";
 		case DTX_PROTOCOL_COMMAND_ABORT_SOME_PREPARED:
 			return "Distributed Abort (Some Prepared)";
+		case DTX_PROTOCOL_COMMAND_COMMIT_ONEPHASE:
+			return "Distributed Commit (one-phase)";
 		case DTX_PROTOCOL_COMMAND_COMMIT_PREPARED:
 			return "Distributed Commit Prepared";
+		case DTX_PROTOCOL_COMMAND_COMMIT_NOT_PREPARED:
+			return "Distributed Commit Not Prepared";
 		case DTX_PROTOCOL_COMMAND_ABORT_PREPARED:
 			return "Distributed Abort Prepared";
 		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED:

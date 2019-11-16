@@ -110,6 +110,8 @@ SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
 	 */
 	if (AmIInSIGUSR1Handler())
 	{
+		elogif(debug_walrepl_syncrep, LOG,
+				"canceling wait for synchronous replication as we are in SIGUSR1 handler");
 		return;
 	}
 	Assert(!am_walsender);
@@ -307,7 +309,7 @@ SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
 			ereport(WARNING,
 					(errmsg("ignoring query cancel request for synchronous replication to ensure cluster consistency"),
 					 errdetail("The transaction has already changed locally, it has to be replicated to standby.")));
-			SIMPLE_FAULT_INJECTOR(SyncRepQueryCancel);
+			SIMPLE_FAULT_INJECTOR("sync_rep_query_cancel");
 		}
 
 		/*

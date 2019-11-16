@@ -210,7 +210,7 @@ BufFileCreateTempInSet(workfile_set *work_set, bool interXact)
 	FileSetIsWorkfile(file->file);
 	RegisterFileWithSet(file->file, work_set);
 
-	SIMPLE_FAULT_INJECTOR(WorkfileCreationFail);
+	SIMPLE_FAULT_INJECTOR("workfile_creation_failure");
 
 	return file;
 }
@@ -419,6 +419,7 @@ BufFileRead(BufFile *file, void *ptr, size_t size)
 		case BFS_SEQUENTIAL_WRITING:
 		case BFS_COMPRESSED_WRITING:
 			elog(ERROR, "cannot read from sequential BufFile before rewinding to start");
+			break;
 
 		case BFS_COMPRESSED_READING:
 			return BufFileLoadCompressedBuffer(file, ptr, size);
@@ -508,6 +509,7 @@ BufFileReadFromBuffer(BufFile *file, size_t size)
 		case BFS_SEQUENTIAL_WRITING:
 		case BFS_COMPRESSED_WRITING:
 			elog(ERROR, "cannot read from sequential BufFile before rewinding to start");
+			return NULL;
 
 		case BFS_COMPRESSED_READING:
 			return NULL;
@@ -536,7 +538,7 @@ BufFileWrite(BufFile *file, const void *ptr, size_t size)
 	size_t		nwritten = 0;
 	size_t		nthistime;
 
-	SIMPLE_FAULT_INJECTOR(WorkfileWriteFail);
+	SIMPLE_FAULT_INJECTOR("workfile_write_failure");
 
 	switch (file->state)
 	{

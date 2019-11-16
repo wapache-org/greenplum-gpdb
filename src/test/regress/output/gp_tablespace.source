@@ -78,7 +78,13 @@ FROM pg_tablespace WHERE spcname = 'testspace';
  t
 (1 row)
 
--- Confirm that all the dbid directories were created under the testtablespace path
+-- Ensure mirrors have applied filesystem changes
+SELECT force_mirrors_to_catch_up();
+ force_mirrors_to_catch_up 
+---------------------------
+ 
+(1 row)
+
 \! ls @testtablespace@;
 1
 2
@@ -296,6 +302,13 @@ WHERE a.versiondirs = get_tablespace_version_directory_name();
 -- Do not drop the dbid directory, nor the existing version directory if you
 -- drop this tablespace
 DROP TABLESPACE testspace_existing_version_dir;
+-- Ensure mirrors have applied filesystem changes
+SELECT force_mirrors_to_catch_up();
+ force_mirrors_to_catch_up 
+---------------------------
+ 
+(1 row)
+
 \! ls @testtablespace@_existing_version_dir/*;
 @testtablespace@_existing_version_dir/1:
 GPDB_99_399999991
@@ -338,7 +351,7 @@ SELECT rolname from pg_roles WHERE oid in (SELECT spcowner FROM pg_tablespace WH
  t_owner
 (1 row)
 
-ALTER TABLESPACE testspace_otherloc OWNER TO @gpcurusername@;
+ALTER TABLESPACE testspace_otherloc OWNER TO @curusername@;
 DROP ROLE t_owner;
 -- test RENAME
 ALTER TABLESPACE testspace_otherloc RENAME TO testspace_otherloc2;

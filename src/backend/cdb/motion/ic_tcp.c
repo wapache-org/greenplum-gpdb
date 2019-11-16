@@ -1231,7 +1231,7 @@ SetupTCPInterconnect(EState *estate)
 	ChunkTransportStateEntry *sendingChunkTransportState = NULL;
 	ChunkTransportState *interconnect_context;
 
-	SIMPLE_FAULT_INJECTOR(InterconnectSetupPalloc);
+	SIMPLE_FAULT_INJECTOR("interconnect_setup_palloc");
 	interconnect_context = palloc0(sizeof(ChunkTransportState));
 
 	/* initialize state variables */
@@ -1262,10 +1262,6 @@ SetupTCPInterconnect(EState *estate)
 
 	gp_set_monotonic_begin_time(&startTime);
 
-	/* Initiate outgoing connections. */
-	if (mySlice->parentIndex != -1)
-		sendingChunkTransportState = startOutgoingConnections(interconnect_context, mySlice, &expectedTotalOutgoing);
-
 	/* now we'll do some setup for each of our Receiving Motion Nodes. */
 	foreach(cell, mySlice->children)
 	{
@@ -1294,6 +1290,17 @@ SetupTCPInterconnect(EState *estate)
 
 		(void) createChunkTransportState(interconnect_context, aSlice, mySlice, totalNumProcs);
 	}
+
+	/*
+	 * Initiate outgoing connections.
+	 *
+	 * startOutgoingConnections() and createChunkTransportState() must not be
+	 * called during the lifecycle of sendingChunkTransportState, they will
+	 * repalloc() interconnect_context->states so sendingChunkTransportState
+	 * points to invalid memory.
+	 */
+	if (mySlice->parentIndex != -1)
+		sendingChunkTransportState = startOutgoingConnections(interconnect_context, mySlice, &expectedTotalOutgoing);
 
 	if (expectedTotalIncoming > listenerBacklog)
 		ereport(WARNING, (errmsg("SetupTCPInterconnect: too many expected incoming connections(%d), Interconnect setup might possibly fail", expectedTotalIncoming),
@@ -1547,6 +1554,8 @@ SetupTCPInterconnect(EState *estate)
 		ML_CHECK_FOR_INTERRUPTS(interconnect_context->teardownActive);
 		n = select(highsock + 1, (fd_set *) &rset, (fd_set *) &wset, (fd_set *) &eset, &timeout);
 		ML_CHECK_FOR_INTERRUPTS(interconnect_context->teardownActive);
+		if (Gp_role == GP_ROLE_DISPATCH)
+			checkForCancelFromQD(interconnect_context);
 
 		elapsed_ms = gp_get_elapsed_ms(&startTime);
 

@@ -1,6 +1,9 @@
 import glob
 from datetime import datetime, timedelta
-from subprocess import Popen, PIPE
+try:
+    from subprocess32 import Popen, PIPE
+except:
+    from subprocess import Popen, PIPE
 from utils import run_gpcommand
 
 from gppylib.commands.base import Command
@@ -73,7 +76,7 @@ class Gpexpand:
     def get_redistribute_status(self):
         sql = 'select status from gpexpand.status order by updated desc limit 1'
         dburl = dbconn.DbURL(dbname=self.database)
-        conn = dbconn.connect(dburl, encoding='UTF8')
+        conn = dbconn.connect(dburl, encoding='UTF8', unsetSearchPath=False)
         status = dbconn.execSQLForSingleton(conn, sql)
         if status == 'EXPANSION COMPLETE':
             rc = 0

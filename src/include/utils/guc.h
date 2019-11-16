@@ -220,8 +220,9 @@ typedef enum
 #define GUC_DISALLOW_IN_AUTO_FILE	0x00010000	/* can't set in PG_AUTOCONF_FILENAME */
 
 /* GPDB speific */
-#define GUC_GPDB_ADDOPT        0x00020000  /* Send by cdbgang */
-#define GUC_DISALLOW_USER_SET  0x00040000 /* Do not allow this GUC to be set by the user */
+#define GUC_GPDB_NEED_SYNC     0x00020000  /* guc value is synced between master and primary */
+#define GUC_GPDB_NO_SYNC       0x00040000  /* guc value is not synced between master and primary */
+#define GUC_DISALLOW_USER_SET  0x00080000 /* Do not allow this GUC to be set by the user */
 
 /* GUC lists for gp_guc_list_show().  (List of struct config_generic) */
 extern List    *gp_guc_list_for_explain;
@@ -473,6 +474,8 @@ extern bool optimizer_enable_eageragg;
 extern bool optimizer_expand_fulljoin;
 extern bool optimizer_enable_hashagg;
 extern bool optimizer_enable_groupagg;
+extern bool optimizer_enable_mergejoin;
+extern bool optimizer_prune_unused_columns;
 
 /* Optimizer plan enumeration related GUCs */
 extern bool optimizer_enumerate_plans;
@@ -503,10 +506,12 @@ extern int optimizer_join_order_threshold;
 extern int optimizer_join_order;
 extern int optimizer_join_arity_for_associativity_commutativity;
 extern int optimizer_cte_inlining_bound;
+extern int optimizer_push_group_by_below_setop_threshold;
 extern bool optimizer_force_multistage_agg;
 extern bool optimizer_force_three_stage_scalar_dqa;
 extern bool optimizer_force_expanded_distinct_aggs;
 extern bool optimizer_force_agg_skew_avoidance;
+extern bool optimizer_penalize_skew;
 extern bool optimizer_prune_computed_columns;
 extern bool optimizer_push_requirements_from_consumer_to_producer;
 extern bool optimizer_enforce_subplans;
@@ -523,6 +528,7 @@ extern bool optimizer_enable_associativity;
 /* Analyze related GUCs for Optimizer */
 extern bool optimizer_analyze_root_partition;
 extern bool optimizer_analyze_midlevel_partition;
+extern bool optimizer_analyze_enable_merge_of_leaf_stats;
 
 extern bool optimizer_use_gpdb_allocators;
 
@@ -767,6 +773,7 @@ extern const char *gpvars_show_gp_resqueue_memory_policy(void);
 extern bool gpvars_check_statement_mem(int *newval, void **extra, GucSource source);
 extern bool gpvars_check_gp_enable_gpperfmon(bool *newval, void **extra, GucSource source);
 extern bool gpvars_check_gp_gpperfmon_send_interval(int *newval, void **extra, GucSource source);
+extern int guc_name_compare(const char *namea, const char *nameb);
 
 
 extern StdRdOptions *defaultStdRdOptions(char relkind);

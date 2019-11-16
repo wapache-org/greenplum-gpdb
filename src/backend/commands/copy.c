@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <catalog/catalog.h>
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -985,6 +986,15 @@ DoCopy(const CopyStmt *stmt, const char *queryString, uint64 *processed)
 		/* Open and lock the relation, using the appropriate lock type. */
 		rel = heap_openrv(stmt->relation,
 						  (is_from ? RowExclusiveLock : AccessShareLock));
+
+		if (is_from && !allowSystemTableMods && IsUnderPostmaster && IsSystemRelation(rel))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+							errmsg("permission denied: \"%s\" is a system catalog",
+								RelationGetRelationName(rel)),
+								errhint("Make sure the configuration parameter allow_system_table_mods is set.")));
+		}
 
 		relid = RelationGetRelid(rel);
 
@@ -2519,6 +2529,10 @@ DoCopyTo(CopyState cstate)
 	bool		fe_copy = (pipe && whereToSendOutput == DestRemote);
 	uint64		processed;
 
+#ifdef FAULT_INJECTOR
+	FaultInjector_InjectFaultIfSet("DoCopyToFail", DDLNotSpecified, "", "");
+#endif
+
 	PG_TRY();
 	{
 		if (fe_copy)
@@ -3632,7 +3646,7 @@ CopyFrom(CopyState cstate)
 	if ((resultRelInfo->ri_TrigDesc != NULL &&
 		 (resultRelInfo->ri_TrigDesc->trig_insert_before_row ||
 		  resultRelInfo->ri_TrigDesc->trig_insert_instead_row)) ||
-		cstate->volatile_defexprs)
+		cstate->volatile_defexprs || cstate->oids)
 	{
 		useHeapMultiInsert = false;
 	}
@@ -4417,7 +4431,8 @@ BeginCopyFrom(Relation rel,
 	/*
 	 * Determine the mode
 	 */
-	if (Gp_role == GP_ROLE_DISPATCH && !cstate->on_segment)
+	if (Gp_role == GP_ROLE_DISPATCH && !cstate->on_segment &&
+		cstate->rel && cstate->rel->rd_cdbpolicy)
 		cstate->dispatch_mode = COPY_DISPATCH;
 	else if (Gp_role == GP_ROLE_EXECUTE && !cstate->on_segment)
 		cstate->dispatch_mode = COPY_EXECUTOR;
@@ -4794,7 +4809,7 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		for (;;)
 		{
 			bool		got_error = false;
-			bool		result;
+			bool		result = false;
 
 			PG_TRY();
 			{
@@ -7053,7 +7068,7 @@ truncateEolStr(char *str, EolType eol_type)
 static void
 copy_dest_startup(DestReceiver *self __attribute__((unused)), int operation __attribute__((unused)), TupleDesc typeinfo __attribute__((unused)))
 {
-	if (Gp_role == GP_ROLE_DISPATCH)
+	if (Gp_role != GP_ROLE_EXECUTE)
 		return;
 	DR_copy    *myState = (DR_copy *) self;
 	myState->cstate = BeginCopyToOnSegment(myState->queryDesc);
@@ -7082,7 +7097,7 @@ copy_dest_receive(TupleTableSlot *slot, DestReceiver *self)
 static void
 copy_dest_shutdown(DestReceiver *self __attribute__((unused)))
 {
-	if (Gp_role == GP_ROLE_DISPATCH)
+	if (Gp_role != GP_ROLE_EXECUTE)
 		return;
 	DR_copy    *myState = (DR_copy *) self;
 	EndCopyToOnSegment(myState->cstate);
@@ -7111,7 +7126,8 @@ CreateCopyDestReceiver(void)
 	self->pub.rDestroy = copy_dest_destroy;
 	self->pub.mydest = DestCopyOut;
 
-	self->cstate = NULL;		/* will be set later */
+	self->cstate = NULL;		/* need to be set later */
+	self->queryDesc = NULL;		/* need to be set later */
 	self->processed = 0;
 
 	return (DestReceiver *) self;

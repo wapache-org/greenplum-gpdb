@@ -5,6 +5,9 @@ set search_path to hashagg_spill;
 create language plpythonu;
 -- end_ignore
 
+-- force multistage to increase likelihood of spilling
+set optimizer_force_multistage_agg = on;
+
 -- set workfile is created to true if all segment did it.
 create or replace function hashagg_spill.is_workfile_created(explain_query text)
 returns setof int as
@@ -92,5 +95,32 @@ select overflows > 1 from hashagg_spill.num_hashagg_overflows('explain analyze
 select count(*) from (select i, count(*) from aggspill group by i,j,t having count(*) = 3) g') overflows;
 
 select count(*) from (select i, count(*) from aggspill group by i,j,t having count(*) = 3) g;
+
+reset optimizer_force_multistage_agg;
+
+-- Test the spilling of aggstates
+--     with and without serial/deserial functions
+--     with and without workfile compression
+-- The transition type of numeric is internal, and hence it uses the serial/deserial functions when spilling
+-- The transition type value of integer is by Ref, and it does not have any serial/deserial function when spilling
+CREATE TABLE hashagg_spill(col1 numeric, col2 int) DISTRIBUTED BY (col1);
+INSERT INTO hashagg_spill SELECT id, 1 FROM generate_series(1,20000) id;
+ANALYZE hashagg_spill;
+SET statement_mem='1000kB';
+SET gp_workfile_compression = OFF;
+select overflows >= 1 from hashagg_spill.num_hashagg_overflows('explain analyze
+SELECT avg(col2) col2 FROM hashagg_spill GROUP BY col1 HAVING(sum(col1)) < 0;') overflows;
+SET gp_workfile_compression = ON;
+select overflows >= 1 from hashagg_spill.num_hashagg_overflows('explain analyze
+SELECT avg(col2) col2 FROM hashagg_spill GROUP BY col1 HAVING(sum(col1)) < 0;') overflows;
+
+-- check spilling to a temp tablespace
+CREATE TABLE spill_temptblspace (a numeric) DISTRIBUTED BY (a);
+SET temp_tablespaces=pg_default;
+INSERT INTO spill_temptblspace SELECT avg(col2) col2 FROM hashagg_spill GROUP BY col1 HAVING(sum(col1)) < 0;
+RESET temp_tablespaces;
+RESET statement_mem;
+RESET gp_workfile_compression;
+
 
 drop schema hashagg_spill cascade;
