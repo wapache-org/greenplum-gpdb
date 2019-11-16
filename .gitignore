@@ -65,3 +65,7 @@ lib*.pc
 /Debug/
 /Release/
 /cmake-build-debug/
+/depends/.conan/
+/depends/Makefile
+/depends/config.*
+/gpMgmt/bin/
